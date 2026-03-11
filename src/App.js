@@ -86,65 +86,25 @@ const catColors = {
 const getCatColor = (cat) => catColors[cat] || catColors.Website;
 
 // --- API helper to fetch from Google Sheets via Anthropic ---
-async function fetchSheetData(sheetRange) {
+async async function fetchSheetData(sheetRange) {
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
-        messages: [
-          {
-            role: "user",
-            content: `Read all data from the sheet range "${sheetRange}" in spreadsheet ID "${SPREADSHEET_ID}". Return ONLY valid JSON — no backticks, no markdown. Format: {"data": [["col1","col2",...], ["val1","val2",...], ...]}. Each inner array is a row. First row is headers.`,
-          },
-        ],
-        mcp_servers: [
-          {
-            type: "url",
-            url: "https://server.smithery.ai/googlesheets",
-            name: "googlesheets",
-          },
-        ],
-      }),
-    });
-    const result = await response.json();
-
-    // Extract all text + tool result blocks
-    let allText = "";
-    for (const block of result.content || []) {
-      if (block.type === "text" && block.text) {
-        allText += block.text + "\n";
-      }
-      if (block.type === "mcp_tool_result" && block.content) {
-        for (const inner of block.content) {
-          if (inner.text) allText += inner.text + "\n";
-        }
-      }
-    }
-
-    // Try to parse JSON from the combined text
-    // Look for JSON arrays or objects
-    const jsonMatch = allText.match(/\{[\s\S]*"data"[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-
-    // Try to find array directly
-    const arrMatch = allText.match(/\[\s*\[[\s\S]*\]\s*\]/);
-    if (arrMatch) {
-      return { data: JSON.parse(arrMatch[0]) };
-    }
-
-    // If we have tool results with values, parse them
-    const valuesMatch = allText.match(/"values"\s*:\s*(\[\s*\[[\s\S]*?\]\s*\])/);
-    if (valuesMatch) {
-      return { data: JSON.parse(valuesMatch[1]) };
-    }
-
-    console.log("Raw response:", allText);
-    return null;
+    // This fetches your Google Sheet data as a CSV (Public access required)
+    const sheetName = sheetRange.split('!')[0];
+    const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
+    
+    const response = await fetch(url);
+    const text = await response.text();
+    
+    // Google returns a weird prefix "/*O_o*/ google.visualization.Query.setResponse(...)"
+    // We strip it to get the pure JSON
+    const jsonData = JSON.parse(text.substring(47, text.length - 2));
+    
+    const rows = jsonData.table.rows.map(row => 
+      row.c.map(cell => cell ? (cell.v || "") : "")
+    );
+    const headers = jsonData.table.cols.map(col => col.label);
+    
+    return { data: [headers, ...rows] };
   } catch (err) {
     console.error("Sheet fetch error:", err);
     return null;
